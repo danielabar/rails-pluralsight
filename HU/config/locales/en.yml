@@ -20,4 +20,8 @@
 # available at http://guides.rubyonrails.org/i18n.html.
 
 en:
-  hello: "Hello world"
+  hello: 'Hello world'
+
+  main_mailer:
+    notify_question_author:
+      subject: 'New answer to your question'

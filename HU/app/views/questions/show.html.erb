@@ -35,6 +35,9 @@
         </div>
       <% end %>
 
+      <% if @answers.empty? %>
+        <div class="alert alert-info">No answers have been posted yet.</div>
+      <% end %>
 
     </div>
   </div>

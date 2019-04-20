@@ -14,6 +14,14 @@
     - [Asking a Question](#asking-a-question)
     - [The Answer Resource](#the-answer-resource)
     - [Relationships](#relationships)
+  - [Action Mailer and Active Job](#action-mailer-and-active-job)
+    - [Informative UI](#informative-ui)
+    - [Working with Sessions](#working-with-sessions)
+    - [Test Driven Development](#test-driven-development)
+    - [Email Previews](#email-previews)
+    - [Active Job with Sucker Pench](#active-job-with-sucker-pench)
+  - [Deployment](#deployment)
+    - [Push to Deploy](#push-to-deploy)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -329,8 +337,9 @@ end
 - Fix by using form helper in view instead of regular form tag, which will generate form tag _and_ include a valid authenticity token
 
 ```html
-<%= form_for :question, url: '/questions', html: { class: 'form-horizontal' } do
-%> ... <% end %>
+<%= form_for :question, url: '/questions', html: { class: 'form-horizontal' } do %>
+  ...
+<% end %>
 ```
 
 Test submit question form, now it works, server log shows form post parameters including authenticity token:
@@ -1004,3 +1013,452 @@ class Answer < ActiveRecord::Base
   belongs_to :question
 end
 ```
+
+## Action Mailer and Active Job
+
+### Informative UI
+
+Rails console provides access to all application objects, can also modify, eg delete all
+
+```shell
+$ rails console
+2.6.0 :001 > Answer.count
+   (0.1ms)  SELECT COUNT(*) FROM "answers"
+ => 6
+2.6.0 :002 > Question.count
+   (0.3ms)  SELECT COUNT(*) FROM "questions"
+ => 4
+2.6.0 :003 > Answer.delete
+Answer.delete      Answer.delete_all
+2.6.0 :003 > Answer.delete
+Answer.delete      Answer.delete_all
+2.6.0 :003 > Answer.delete_all
+  SQL (2.1ms)  DELETE FROM "answers"
+ => 6
+2.6.0 :004 > Question.delete_all
+  SQL (1.5ms)  DELETE FROM "questions"
+ => 4
+```
+
+Now look at app with no data - shows just a blank screen. Need to inform user there are no questions currently.
+
+Question listing is in `home/index.html.erb`. Modify to check if questions is empty and show a message. `@questions` is an array so can invoke array methods on it like `empty?`
+
+```html
+<% if @questions.empty? %>
+  <div class="alert alert-info">Nothing here yet, be the first to ask?</div>
+<% end %>
+```
+
+Also show a message in `show.html.erb` when question has no answers yet
+
+```html
+<% if @answers.empty? %>
+  <div class="alert alert-info">No answers have been posted yet.</div>
+<% end %>
+```
+
+### Working with Sessions
+
+Currently, user has to keep filling in their email every time to ask new question or post an answer.
+
+Real app would have user authentication system, but for this, will use server side session, maintained with browser cookie.
+
+First make server remember email user sent. Modify `questions_controller.rb`. In `create` method, email is available in `question_params[:email]`. Save this in `session` object
+
+```ruby
+class QuestionsController < ApplicationController
+  # ...
+  def create
+    Question.create(question_params)
+    session[:current_user_email] = question_params[:email]
+    redirect_to root_path
+  end
+  # ...
+end
+```
+
+Also save email when answer is submitted
+
+```ruby
+class AnswersController < ApplicationController
+  def create
+    question = Question.find(params[:answer][:question_id])
+    question.answers.create(answer_params)
+    session[:current_user_email] = answer_params[:email]
+    redirect_to question
+  end
+  # ...
+end
+```
+
+Temporarily debug if session email is being saved, modify `HU/app/views/layouts/application.html.erb` to display it
+
+```html
+<div class="well"><%= session[:current_user_email] || 'No email is saved' %></div>
+```
+
+Need to modify question and answer form views to read stored email from session.
+
+BUT not good practice to reference session directly in views because that's an implementation detail, eg: in the future may switch to auth system, then would have to modify view to read current email from somewhere else.
+
+For views - should abstract values being read - do this with Rails Helpers.
+
+Instead of referencing session in views, reference a helper (doesn't exist yet)
+
+```html
+<div class="some-class"><%= current_user_email %></div>
+```
+
+Create method `current_user_email` in `HU/app/helpers/application_helper.rb`
+
+```ruby
+module ApplicationHelper
+  def current_user_email
+    session[:current_user_email]
+  end
+end
+```
+
+Now want to use this helper method in email field of forms. If there were lots of forms to be modified, use `git grep` to search in committed files using regex. This omits git ignored files like logs etc.
+
+```shell
+$ git grep input.*email
+app/views/home/_new_answer_form.html.erb:              <input type="email" name="answer[email]" class="form-control" id="inputEmail" placeholder="Email" required>
+app/views/home/_new_question_form.html.erb:              <input type="email" name="question[email]" class="form-control" id="inputEmail" placeholder="Email" required>
+```
+
+This tells us need to modify `_new_answer_form.html.erb` and `app/views/home/_new_question_form.html.erb`
+
+```html
+<!-- _new_answer_form.html.erb -->
+<input type="email" name="answer[email]" class="form-control" id="inputEmail" placeholder="Email" required value="<%= current_user_email %>">
+
+<!-- app/views/home/_new_question_form.html.erb -->
+<input type="email" name="question[email]" class="form-control" id="inputEmail" placeholder="Email" required value="<%= current_user_email %>">
+```
+
+Finally, display current user email in `_navbar.html`
+
+```html
+<div class="navbar-text"><%= current_user_email || 'No email is saved' %></div>
+```
+### Test Driven Development
+
+Feature: Send question author email notifying them when a new answer has been posted.
+
+Use *ActionMailer* - similar to Controller but controls emails rather than views.
+
+Generate new mailer with generator `mailer` option, given it mailer name followed by list of methods for each email to be sent
+
+```shell
+$ rails g mailer main_mailer notify_question_author
+Running via Spring preloader in process 14081
+  create  app/mailers/main_mailer.rb
+  create  app/mailers/application_mailer.rb
+  invoke  erb
+  create    app/views/main_mailer
+  create    app/views/layouts/mailer.text.erb
+  create    app/views/layouts/mailer.html.erb
+  create    app/views/main_mailer/notify_question_author.text.erb
+  create    app/views/main_mailer/notify_question_author.html.erb
+  invoke  test_unit
+  create    test/mailers/main_mailer_test.rb
+  create    test/mailers/previews/main_mailer_preview.rb
+```
+
+- `main_mailer.rb` is where email will be prepared
+- `app/views` is the view for the email
+- also generated test files
+
+Given `HU/app/mailers/main_mailer.rb`, generated passing test `HU/test/mailers/main_mailer_test.rb`. To run tests
+
+```shell
+$ rake test
+```
+
+TDD approach - implement `main_mailer_test.rb` for how email should look
+
+```ruby
+require 'test_helper'
+
+class MainMailerTest < ActionMailer::TestCase
+  test "notify_question_author" do
+    mail = MainMailer.notify_question_author
+    assert_equal "New answer to your question", mail.subject # causes test to fail because code is using default subject
+    assert_equal ["to@example.org"], mail.to
+    assert_equal ["from@example.com"], mail.from
+    assert_match "Hi", mail.body.encoded
+  end
+end
+```
+
+Recommend to use language file for implementing email rather than hard-coding condent in rb file, supports i18n `HU/config/locales/en.yml`
+
+```yml
+en:
+hello: 'Hello world'
+
+main_mailer:
+  notify_question_author:
+    subject: 'New answer to your question'
+```
+
+Run the tests again - should pass now.
+
+Continuing with TDD... Receiver of email should be author of question, but `email` object doesn't have reference to question or answer.
+
+To fix this, pass in `answer` object to mailer. To do this need test data - need to create example question and answer for test.
+
+*fixtures* can be used to create data in yml format or can create data right in the test.
+
+```ruby
+# HU/test/mailers/main_mailer_test.rb
+require 'test_helper'
+
+class MainMailerTest < ActionMailer::TestCase
+  test "notify_question_author" do
+    # Generate some data for test
+    question = Question.create email: 'author@question.com', body: 'a test question'
+    answer = Answer.create email: 'author@answer.com', body: 'a test answer'
+    # Associate answer with question by appending it to answers relation on question
+    question.answers << answer
+
+    mail = MainMailer.notify_question_author(answer)
+
+    assert_equal "New answer to your question", mail.subject
+    assert_equal [question.email], mail.to
+    assert_equal [answer.email], mail.from
+    assert_match "Hi", mail.body.encoded
+  end
+end
+```
+
+To fix, update `main_mailer.rb` notify method to accept an `answer` argument, then use it for setting mail to/from
+
+```ruby
+class MainMailer < ApplicationMailer
+
+  # Subject can be set in your I18n file at config/locales/en.yml
+  # with the following lookup:
+  #
+  #   en.main_mailer.notify_question_author.subject
+  #
+  def notify_question_author(answer)
+    @greeting = "Hi"
+
+    mail to: answer.question.email, from: answer.email
+  end
+end
+```
+
+Finally, ensure answer body is included in email
+
+```ruby
+require 'test_helper'
+
+class MainMailerTest < ActionMailer::TestCase
+  test "notify_question_author" do
+    # Generate some data for test
+    question = Question.create email: 'author@question.com', body: 'a test question'
+    answer = Answer.create email: 'author@answer.com', body: 'a test answer'
+    # Associate answer with question by appending it to answers relation on question
+    question.answers << answer
+
+    mail = MainMailer.notify_question_author(answer)
+
+    assert_equal "New answer to your question", mail.subject
+    assert_equal [question.email], mail.to
+    assert_equal [answer.email], mail.from
+    assert_match answer.body, mail.body.encoded
+  end
+
+end
+```
+
+And fix code so test passes in view associated with main mailer `HU/app/views/main_mailer/notify_question_author.text.erb`. However, the view can only access instance variables exposed in `main_mailer.rb`
+
+```ruby
+# main_mailer.rb
+def notify_question_author(answer)
+  @greeting = "Hi"
+  @answer = answer
+
+  mail to: answer.question.email, from: answer.email
+end
+
+# notify_question_author.text.erb
+<%= @greeting %>,
+My answer:
+<%= @answer.body %>
+```
+
+Now test passes.
+
+### Email Previews
+
+Modify `AnswersController` `create` method to request MainMailer to send the email, passing in the `answer` object that was just created.
+
+`MainMailer.notify_question_author(answer)` prepares email, `deliver_now` sends it immediately.
+
+To test, note that in Rails dev env, emails don't get sent but can be seen in logs
+
+```
+MainMailer#notify_question_author: processed outbound mail in 213.5ms
+
+Sent mail to a@a.a (8.8ms)
+Date: Fri, 19 Apr 2019 12:44:10 -0400
+From: d@d.d
+To: a@a.a
+Message-ID: <5cb9fada9698b_ef03fc23a0822301396b@Danielas-Mac-mini.local.mail>
+Subject: New answer to your question
+Mime-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="--==_mimepart_5cb9fada94e83_ef03fc23a0822301381";
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+
+----==_mimepart_5cb9fada94e83_ef03fc23a0822301381
+Content-Type: text/plain;
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+Hi,
+My answer:
+whatever
+
+
+----==_mimepart_5cb9fada94e83_ef03fc23a0822301381
+Content-Type: text/html;
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+<html>
+  <body>
+    <h1>MainMailer#notify_question_author</h1>
+
+<p>
+  Hi, find me in app/views/main_mailer/notify_question_author.html.erb
+</p>
+
+  </body>
+</html>
+
+----==_mimepart_5cb9fada94e83_ef03fc23a0822301381--
+```
+
+Note HTML email template was not modified, still showing default values. Modify `HU/app/views/main_mailer/notify_question_author.html.erb`
+
+```ruby
+<%= @greeting %>,
+<h3>My answer:</h3>
+<p>
+  <%= @answer.body %>
+</p>
+```
+
+If test again, will show in log but for html, need to see in browser. Use *Mail Preview* feature.
+
+See `HU/test/mailers/previews/main_mailer_preview.rb` that was generated earlier, shows link to use to preview email in browser
+
+```ruby
+# Preview all emails at http://localhost:3000/rails/mailers/main_mailer
+class MainMailerPreview < ActionMailer::Preview
+
+  # Preview this email at http://localhost:3000/rails/mailers/main_mailer/notify_question_author
+  def notify_question_author
+    MainMailer.notify_question_author
+  end
+
+end
+```
+
+Can't use as is because we modified email. Bring over test data from `main_mailer_test.rb`:
+
+```ruby
+# Preview all emails at http://localhost:3000/rails/mailers/main_mailer
+class MainMailerPreview < ActionMailer::Preview
+
+  # Preview this email at http://localhost:3000/rails/mailers/main_mailer/notify_question_author
+  def notify_question_author
+    # Generate some data for test
+    question = Question.create email: 'author@question.com', body: 'a test question'
+    answer = Answer.create email: 'author@answer.com', body: 'a test answer'
+
+    # Associate answer with question by appending it to answers relation on question
+    question.answers << answer
+
+    # Generate email
+    MainMailer.notify_question_author(answer)
+  end
+
+end
+```
+
+Then open browser at [http://localhost:3000/rails/mailers/main_mailer/notify_question_author](http://localhost:3000/rails/mailers/main_mailer/notify_question_author)
+
+![html mail preview](doc-images/html-mail-preview.png "html mail preview")
+
+**ISSUE: POLLUTING DEVELOPMENT DATABASE WITH TEST DATA**
+
+Every time hit email preview link, it runs the test which generates a new Question and Answer, which gets saved in development database.
+
+To avoid this, use first Answer that happens to be in database
+
+### Active Job with Sucker Pench
+
+`deliver_now` sends email in same process that is serving the web page. Bad for performance, if email sending code is slow, blocks thread.
+
+Simulate slow mailer with `sleep` method:
+
+```ruby
+class MainMailer < ApplicationMailer
+
+  # Subject can be set in your I18n file at config/locales/en.yml
+  # with the following lookup:
+  #
+  #   en.main_mailer.notify_question_author.subject
+  #
+  def notify_question_author(answer)
+    # simulate slow mailer
+    sleep 5 # 5 seconds
+    @greeting = "Hi"
+    @answer = answer
+
+    mail to: answer.question.email, from: answer.email
+  end
+end
+```
+
+Trying to submit answer now - have to wait 5 seconds for control to return to browser.
+
+Solution is to use `deliver_later`, which uses *ActiveJob* to deliver email with background processing library. Then user using web UI doesn't need to wait for email sending to complete.
+
+```ruby
+class AnswersController < ApplicationController
+  def create
+    question = Question.find(params[:answer][:question_id])
+    answer = question.answers.create(answer_params)
+    MainMailer.notify_question_author(answer).deliver_later # BACKGROUND PROCESSING
+    session[:current_user_email] = answer_params[:email]
+    redirect_to question
+  end
+
+  private
+
+  def answer_params
+    params.require(:answer).permit(:email, :body)
+  end
+end
+```
+
+However, above won't work yet, need to use an ActiveJob adapter. For this course, will use [sucker_punch](https://github.com/brandonhilkert/sucker_punch). See [Active Job](https://github.com/brandonhilkert/sucker_punch/blob/b84b7f8499d6356e4e0c755730499a21a2319f1e/README.md#active-job)
+
+Add it to `Gemfile`, follow readme instructions to configure, kKill server and run `bundle` to install new gem, then restart server.
+
+Now posting new answer returns control immediately to browser, and scanning server logs, 5 seconds later email gets sent.
+
+## Deployment
+
+### Push to Deploy
