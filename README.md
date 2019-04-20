@@ -20,8 +20,6 @@
     - [Test Driven Development](#test-driven-development)
     - [Email Previews](#email-previews)
     - [Active Job with Sucker Pench](#active-job-with-sucker-pench)
-  - [Deployment](#deployment)
-    - [Push to Deploy](#push-to-deploy)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -1458,7 +1456,3 @@ However, above won't work yet, need to use an ActiveJob adapter. For this course
 Add it to `Gemfile`, follow readme instructions to configure, kKill server and run `bundle` to install new gem, then restart server.
 
 Now posting new answer returns control immediately to browser, and scanning server logs, 5 seconds later email gets sent.
-
-## Deployment
-
-### Push to Deploy
