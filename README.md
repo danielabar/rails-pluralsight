@@ -20,6 +20,34 @@
     - [Test Driven Development](#test-driven-development)
     - [Email Previews](#email-previews)
     - [Active Job with Sucker Pench](#active-job-with-sucker-pench)
+- [Introduction to Ruby on Rails 3 and 4](#introduction-to-ruby-on-rails-3-and-4)
+  - [Overview](#overview)
+    - [Command Line Overview](#command-line-overview)
+    - [Rake Overview](#rake-overview)
+    - [Directory Structure](#directory-structure)
+  - [Architecture](#architecture)
+    - [N-Tiers](#n-tiers)
+    - [Model View Controller](#model-view-controller)
+    - [URL Mappings and Endpoints](#url-mappings-and-endpoints)
+    - [HTTP PATCH andRails 4](#http-patch-andrails-4)
+    - [ORM (Object-Relation Mapping)](#orm-object-relation-mapping)
+    - [ERB (Embedded Ruby)](#erb-embedded-ruby)
+    - [Applicatio Walk Through](#applicatio-walk-through)
+    - [Caching](#caching)
+  - [Rails Tools](#rails-tools)
+    - [Gemfile](#gemfile)
+    - [Database Migrations in Depth](#database-migrations-in-depth)
+    - [Data Seeding](#data-seeding)
+    - [Generators Overview](#generators-overview)
+    - [Generating Models](#generating-models)
+    - [Other Rake Tasks](#other-rake-tasks)
+  - [Rails Controllers and Views](#rails-controllers-and-views)
+    - [Controller and View Support Objects](#controller-and-view-support-objects)
+    - [Common Support Object Uses](#common-support-object-uses)
+  - [Controller Filters](#controller-filters)
+    - [Rails 4 Strong Parameters](#rails-4-strong-parameters)
+  - [Rails Models and Active Record](#rails-models-and-active-record)
+    - [Objects vs Tables](#objects-vs-tables)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -1456,3 +1484,400 @@ However, above won't work yet, need to use an ActiveJob adapter. For this course
 Add it to `Gemfile`, follow readme instructions to configure, kKill server and run `bundle` to install new gem, then restart server.
 
 Now posting new answer returns control immediately to browser, and scanning server logs, 5 seconds later email gets sent.
+
+# Introduction to Ruby on Rails 3 and 4
+
+> Additional notes from this other Pluralsight [course](https://app.pluralsight.com/library/courses/ruby-on-rails3-fundamentals/table-of-contents)
+
+## Overview
+
+### Command Line Overview
+
+- `rails new <app_name>` Create a new rails application with the given name
+- `rails console` Start the interactive rails console
+- `rails server` Star the rails server
+- `rails generate` Genrate various aspects of a rails application
+
+
+### Rake Overview
+
+Building/tasks, similar to ant for Java or make for C/C++. Common tasks:
+
+- `rake -T` List all available tasks
+- `rake db:migrate` Update db structure to match code
+- `rake db:rollback` Rolls back the latest db structure change
+- `rake test` Runs all tests in project
+- `rake routes` Display all app REST endpoints
+- `rake stats` Display statistical information about your project
+
+### Directory Structure
+
+- `app` Most of the code you write goes here. Contains dirs for
+  - `controllers`. Generator provides base application controller `application_controller.rb` from which all other controllers will extend
+  - `models` Empty by defaut, Rails makes no assumptions about your app models
+  - `views` -> `layouts` handles templating `views/layouts/application.html.erb` is base template for adding headers, footers, menus etc
+  - `assets` Part of asset pipeline, all static content such as images, js, stylesheets goes here
+  - `helpers` Put functions that will help with views here
+  - `mailers` Email notifications/communication
+- `config` If configuration is needed, do it here. Mostly in `routes.rb` for handling routes and `database.yml`
+  - `environments` Environment specific config to set properties/values for `development.rb`, `test.rb`, `production.rb`. Add other environments here, eg `staging.rb`
+  - `initializers` Part of middleware rack introduced in Rails 3. Any initialization needed on 3rd party gems or dependencies go here.
+  - `locales` For internationalization
+- `db` All database migrations live here. By default, contains a `seeds.rb` file - load in data to populate/seed database
+- `doc` Use if providing developer documentation, API doc etc
+- `Gemfile` Specifies all deps for rails app. Used by `bundler` to install gems.
+- `lib` Used for rake tasks and any other background/server code. Anything that's not part of MVC code, eg cron jobs.
+- `log` Development and Production log files, any other kind of logging provided by Rails
+- `public` Other assets such as `index.html`, `favicon.ico`. Before Rails 3, all static assets including js, images and stylesheets were also here but caused performance issues so got moved to asset pipeline.
+- `script` Folder not used anymore
+- `test` All test suites - unit, integration, functional, fixtures for data mocking
+- `tmp` Rails will put cached asset pipeline files here, not committed in git
+- `vendor` Deprecated in favour of `Gemfile`
+
+## Architecture
+
+### N-Tiers
+
+Standard 3 tiers:
+- Presentation
+- Logic or Service
+- Data or Persistence
+
+Presentation Tier: Various clients such as
+- browser
+- mobile
+
+Service Tier: MVC and ORM
+- well defined contracts
+- re-use, eg: same service tier can provide data to both browser and mobile clients
+
+Persistence Tier: Data tier, whatever needs to stored long term
+- RDBMS
+- NoSQL
+
+**Considerations**
+
+- Decouple tiers for performance - can have dedicated VM's or cluster of VMs for each.
+- Boundaries between tiers should be well defined
+- Dependency should go to right in below diagram (i.e. should never have persistence tier dependent on presentation tier for example but ok for presentation tier to depend on service, which in turn depends on persistence)
+
+![n tiers](doc-images/n-tiers.png "n tiers")
+
+### Model View Controller
+
+![classic mvc](doc-images/classic-mvc.png "classic mvc")
+
+How Rails fits in
+
+- All controllers extend from default `ApplicationController`, which is subclass of `ActionController` framework, provides REST endpoints routing so requests from clients can find the corresponding controller and action method to run
+- Rails controllers ask Model layer to perform actions on the controller's behalf
+- Controllers responsible for instantiating view for a particular action
+- Model communicates to Persistence Tier
+- All Models extend from `ActiveRecord` rails framework
+- Models are part of ORM to relational DB
+- For complex sql, can issue a sql statement directly from model to db
+- Views in rails are erb files, use `ActionView` API base
+- erb is part of core Ruby language -> text templating framework to embed Ruby code snippets
+- erb files use text templating to create HTML with embedded Ruby code snippets to display dynamic info retrieved from models
+- `ActionView` API wraps request and response objects and various helper methods
+
+### URL Mappings and Endpoints
+
+- Controller endpoint + route === contract with outside world, remote services are able to communicate with app in consistent manner, aka REST based services
+- Controller endpoints can respond to different payloads (json, html, xml)
+- Endpoints are setup using HTTP operation and URL
+- Info taken from URL and HTTP verb, then routed to correct controller and method within that controller
+
+![url mapping](doc-images/url-mapping.png "url mapping")
+
+- First identifier after server:port, specifies the controller `resumes` -> `ResumesController`
+- Identifier after controller specifies the action within the controller `new` -> `new` method
+- If there is no second identifier, rails router assumes default action `index`
+- By default, rails assumes payload is html, but can specify different alternative by adding format suffix to url, eg: `GET http://localhost:3000/resues/new.json`
+
+### HTTP PATCH andRails 4
+
+- Rails 3 updates used to use HTTP `PUT` verb
+- `PUT` is idempotent - expectation is same request can be sent multiple times and same outcome should result each time
+- Rails 4 defaults to `PATCH` verb for edits/updates
+- `PATCH` is not idempotent, outcomes may differ over several requests
+
+### ORM (Object-Relation Mapping)
+
+- `ActiveRecord` framework used by Model layer
+-  To avoid lots of manual configuration "wiring things up", relies on class names to make assumptions about corresponding database tables
+- Eg, given a model `Resume`, will map to `resumes` table in db
+- Note singular form of model name gets pluralized in db since db table contains all records, but in model form, is instance of just one record
+- All columns in db table are setup as implicit getter/setter methods on Model class -> in code can access for eg `resume.email` without having to have written any additional code in Model class
+- Benefit: If in the future add/remove columns from db table, automatically reflected in model class
+
+![orm](/doc-images/orm.png "orm")
+
+### ERB (Embedded Ruby)
+
+- ERB templating used for View layer (similar to JSP for Java)
+- Part of core Ruby
+- To create a view file, write HTML, but anywhere that model data should be displayed, can be embedded with special tags recognized by ERB parser
+- Common tags:
+  - `<% %>` Used for regular Ruby code like loops, if/else blocks, i.e. code that doesn't need to be outputted to actual rendered template
+  - `<%= %>` Output evaluated code snippet contained within tags
+- View begin when controller is exiting an action and called `render:<view>` on specific view
+- Eg: When `/app/controllers/resumes_controller.rb` invokes `render:index`, control gets moved to `app/views/resumes/index.html.erb`, which generates HTML for view, and embeds Ruby code as specified by special tags
+- When template rendering is complete and interpreted, Rails sends output to browser for final rendering on client
+
+![erb](doc-images/erb.png "erb")
+
+### Applicatio Walk Through
+
+![app walkthrough](doc-images/app-walkthrough.png "app walkthrough")
+
+### Caching
+
+Nested fragment cache can expire sections of cache based on underlying object timestamp.
+
+Eg: If partial view of object's date changes, cache can expire and refresh that portion, and if needed, its parent fragment cache.
+
+Fine grained cache refresh improves performance.
+
+`touch` keyword in ActiveRecord - gets object graph ready to cache once displayed.
+
+Eg: If one of the employees changes, mark the manager timestamp has been changed as well. Sets off cache expiration, Rails then reloads necessary fragment caches.
+
+```ruby
+class Manager < ActiveRcord::Base
+  has_many :employees
+end
+
+class Employee < ActiveRecord::Base
+  belongs_to :manager, touch: true
+end
+```
+
+## Rails Tools
+
+### Gemfile
+
+- Keeps track of all deps in project
+- Can specify alternate gem repo (eg: private corporate gem repo)
+- Group deps by environment or other named groups, eg: for debugging or test, add that dep to dev or test groups respectively. Otherwise anything listed in global list will be available to all
+- To add dep:
+  - `gem 'gem_name'` to install latest version
+  - `gem 'gem_name', 'version'` specify specific version
+  - `gem 'gem_name', 'git_repo'`
+
+### Database Migrations in Depth
+
+Keep db structure in sync in all environments
+- Development (bleeding edge)
+- Testing (close to dev or slightly behind)
+- Production (behind testing and development)
+
+`schema_migrations` table used to track versions
+
+Check db for current version, this command queries `schema_migrations` table to return current version in db:
+
+```shell
+$ rake db:version
+```
+
+By default, timestamps (yyyymmddhhmmsss) used to version schema migrations.
+
+To enhance db, eg: add a migration to add indexes to some table
+
+```shell
+$ rails generate migration add_indexes_to_resumes
+```
+
+All migration files generated in `db/migrate` folder.
+
+```ruby
+# db/migrate/<timestamp>_add_indexes_to_resumes.rb
+class AddIndexesToResumes < ActiveRecord::Migration
+  def change
+    add_index :resumes, :name
+  end
+end
+```
+
+To ensure database has this latest version:
+
+```shell
+$ rake db:migrate
+```
+
+Suppose made a mistake in migration code, to go back:
+
+```shell
+$ rake db:rollback
+```
+
+Migration files get committed to git.
+
+### Data Seeding
+
+- Populate data/seed data into db
+- Useful for testing
+- Also useful for every environment, eg: if preferences, lookup values etc must be pre-loaded for app to be functional
+- Seed data goes in `db/seeds.rb`
+- Can enter regular sql or active record ORM model calls
+- Run it with `$ rake db:seed`
+- `seeds.rb` assumes data is in correct version and all migrations have been run
+- Model `create` method accepts a hash
+
+```ruby
+# db/seeds.rb
+Resume.create(name: 'Dan Bunker', phone: '555-555-5555')
+Resume.create(name: 'John Doe', phone: '555-555-5555', city: 'Some City)
+```
+
+Run seed, then verify:
+
+```shell
+$ rails dbconsole
+sqllite> select * from resumes;
+4|Dan Bunker|...
+5|John Doe|...
+```
+
+Running `$ rake db:seed` multiple times will insert same data again. To avoid dupes, could wrap seed code in `if` block and only run if table contains no data:
+
+```ruby
+# db/seeds.rb
+if Resume.count == 0
+  Resume.create(name: 'Dan Bunker', phone: '555-555-5555')
+  Resume.create(name: 'John Doe', phone: '555-555-5555', city: 'Some City)
+end
+```
+
+### Generators Overview
+
+To view all available generators:
+
+```shell
+$ rails generate
+$ rails generate --help
+```
+
+### Generating Models
+
+- Creates ActiveRecord model and migration
+- Pass in attributes and data types to leverage more code generation - the more you know about your model, the better
+- `rails generate model model_name attr1:string attr2:integer ...` Notice space separated attribute:datatype
+
+```shell
+$ rails generate model Job company_name:string work_summary:text start_date:datetime end_date:datetime
+```
+
+### Other Rake Tasks
+
+- `rake about` env info
+- `rake stats` LOC
+- `rake test` runs all tests
+
+## Rails Controllers and Views
+
+### Controller and View Support Objects
+
+- Helper objects exist while in Controller and View
+- Lifecycle Objects
+  - request: Handles incoming request headers, request parameters, and all other http request data
+  - response: Wraps http response going back to browser - response headers and response payload
+- Scoped Objects
+  - params: Convenience object, wraps params coming from http methods (eg: GET, PUT). Useful for REST calls, eg: determine id of model or other values needed by persistence tier
+  - session: Retained and held over several request/response lifecycle eevents. Used for logins or other times when app needs to keep track of user over several requests
+  - flash: Unique to Rails. Retain info over 2 rails actions or 2 request/response lifecycle events. Used for messaging needed to communicate to browser once, but not needed to remain after that. 2 req/res lifecycles needed to handle redirection when two req/res are made user seems response in browser.
+
+Eg: To get IP address of user making request, use `request` object available inside controller which is HTTP Request object: `request.remote_ip`
+
+### Common Support Object Uses
+
+**request**
+
+```ruby
+ActionDispatch::Request < Rack::Request
+
+# Check which HTTP method is being processed
+put? get? post? => true/false
+# Inspect all request headers, useful if using custom headers
+headers => hash
+# If need portions of the url
+remote_ip original_url request_parameters => string/hash
+# Was this an AJAX request?
+xml_http_request? => true/false
+```
+
+**response**
+
+Automatically handled by Rails Rack and Controllers and Views -> generally will not interact with this directly. But you can...
+
+```ruby
+ActionDispatch::Response < Object
+
+# Method to get or set response body, eg: if don't want to use an erb view, but want to render html directly from controller
+body => string
+# Set HTTP response code
+status =
+# Return hash of cookie data, can inspect and set data on this hash
+cookies => hash
+```
+
+**params, session, flash**
+
+Hashes to retrieve or set key/value pairs on these objects. Auto wired for use in controllers and views.
+
+```ruby
+params[:id] => returns id parameter
+session[:key] => returns session value for key
+flash[:notice] => returns flash value for notice
+```
+
+## Controller Filters
+
+- AOP: run code before, after, or around controller methods
+- Useful for logging, enforcing auth
+- Can be inherited, for logic needed in every controller, add to `ApplicationController` base class file
+- Can be scoped to certain methods only
+- Specify for example `before_filter` method in controller, and give it a symbol, symbol refers to method in controller
+
+```ruby
+class ResumeController < ApplicationController
+  before_filter :check_for_top_secret
+
+  def check_for_top_secret
+    # Note that all values in `params` hash are strings, for numeric comaprison, must convert to Integer
+    render :text => "Not authorized", :status => 403 if params[:id] && params[:id].to_i > 500
+  end
+
+  # ...
+end
+```
+
+### Rails 4 Strong Parameters
+
+- Accessible attributes handled in controllers
+- Can change what can be assigned based off of criteria
+
+```ruby
+# app/models/some_model.rb
+def update
+  @resume = Resume.find(params[:id])
+  @resume.update_attributes(resume_params)
+  redirect_to @resume, notice: 'Resume was successfully updated'
+end
+
+private
+
+# Determine what attributes are assignable
+def resume_params
+  if current_user && current_user.admin?
+    # permit method receives a hash of attributes
+    params[:resume].permit(:name, :description)
+  else
+    params[:resume].permit(name)
+  end
+end
+```
+
+## Rails Models and Active Record
+
+### Objects vs Tables

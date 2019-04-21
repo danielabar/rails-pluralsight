@@ -1,4 +1,13 @@
 class QuestionsController < ApplicationController
+  # GET /questions.json
+  def index
+    @questions = Question.order(created_at: :desc).all
+    respond_to do |format|
+      format.html # views/questions/index.html.erb
+  format.json { render json: @questions }
+    end
+  end
+
   # handle GET for a single Question
   def show
     # id from url comes in as :id key of params hash
