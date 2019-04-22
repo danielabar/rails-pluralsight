@@ -47,7 +47,17 @@
   - [Controller Filters](#controller-filters)
     - [Rails 4 Strong Parameters](#rails-4-strong-parameters)
   - [Rails Models and Active Record](#rails-models-and-active-record)
-    - [Objects vs Tables](#objects-vs-tables)
+    - [Callbacks](#callbacks)
+    - [ActiveRecord Query Overview](#activerecord-query-overview)
+    - [Retrieving Data](#retrieving-data)
+    - [Conditions](#conditions)
+    - [Ordering](#ordering)
+    - [Custom Selects and Count](#custom-selects-and-count)
+    - [Grouping](#grouping)
+    - [Paging](#paging)
+    - [Joins](#joins)
+    - [Find by SQL](#find-by-sql)
+    - [Rails 4 ActiveRecord Changes](#rails-4-activerecord-changes)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -1880,4 +1890,97 @@ end
 
 ## Rails Models and Active Record
 
-### Objects vs Tables
+### Callbacks
+
+- Hooks to run code before or after persistence eevents
+- Similar to controller filters/AOP
+- Eg: logging, populate auto columns
+- Common callbacks:
+  - before_validation
+  - after_validation
+  - before_save
+  - after_save
+  - before_create
+  - after_create
+  - after_rollback
+  - after_commit
+  - before_destroy
+
+### ActiveRecord Query Overview
+
+- Find records using models and associations rather than writing explicit SQL statements
+- Can write SQL if need to, then map results to models
+- Query framework provides:
+  - Retrieving objects
+  - Filtering objects with conditions
+  - Ordering retrieved objects
+  - Grouping objects
+  - Paging objects
+
+### Retrieving Data
+
+- Retrive a single record, find by primary key, use `find` static method: `resume = Resume.find(4)`. Throws `RecordNotFoundException`
+- Find first/last record `resume = Resume.first`  `resume = Resume.last`
+- Find all records in table `resume = Resume.all` WATCH OUT don't do this for large tables!
+- Find multiple records using rimary keys `resumes = Resume.find([1, 4, 5, 7, 9])
+
+### Conditions
+
+- Narrow and retrieve correct records
+- Conditions using arrays, use static `where` method on model: `resumes = Resume.where("name=?", "Dan Bunker")` NOTE question marks to prevent SQL injection
+- Where with multiple parameter inserts `resumes = Resume.where("name like ? and state = ?", "Dan%", "CA")`
+- Conditions using hashes, results in code looking more Ruby-like rather than SQL `resumes = Resumes.where(:name => "Dan Bunker")`
+- Find collecting using where with multiple hash values BUT can only check for equality and each key/value pair is AND'ed together `resumes = Resume.where(:name => "Dan Bunker", :state => "CA")` Unable to use LIKE or OR
+
+### Ordering
+
+- With no explicit order, results are returned in default table order
+- Chain the order call to sort the model or the where filter
+- Ordering by name ascending, return first record `resume = Resume.order("name").first`
+- Ordering by name descending and returning all records `resumes = Resue.order("name desc").all`
+- Filter the resumes using a where and then sort by name and secondary sort by state `resumes = Resume.where("name like ? and state = ?", "Dan%", "CA").order("name, state")`
+
+### Custom Selects and Count
+
+- By default, get `SELECT * FROM ...`
+- Select a single field using a symbol or multiple fields using a string
+- Selects all resumes and only populate the name attribute on the model `resumes = Resume.select(:name)` Model object will ONLY contain the fields specified in `select` method, if try to access any other fields will get exception
+- Selects all resumes using 3 fields `resumes = Resume.select("name, state, zip")`
+- Get the table row count using static model method `count`
+- Returns the count of the Resume records `row_count = Resume.count`
+
+### Grouping
+
+- Helps with aggregating data, typically using sql `count`
+- Can use ActiveRecord `group` method rather than native SQL
+- Get the count of resumes that were created each day `resumes = Resume.select("count(*) as res_day_count").group("date(created_at)")`
+
+### Paging
+
+- Use `limit` to select how many records you want to retrieve, aka "page size"
+- Get the first 10 resume records `resume = Resume.limit(10)`
+- Use `offset` to determine the page you want to retrieve, i.e. move forward/back between pages
+- Get the first 10 resume records starting with the 11<sup>th</sup> record `resumes = Resume.limit(10).offset(10)`
+
+### Joins
+
+- ActiveRecord has convenience method for joins
+- Join using SQL string fragment, use when need to specify outer join type, eg: left outer join
+- Do a left outer join with the jobs model and return all records `resumes = Resume.joins("left outer join jobs on jobs.resume_id = resumes.id")
+- Join using array (inner joins only)
+- Do a 2 table inner join with jobs and view_histories `resumes = Resume.joins(:jobs, :view_histories)` More Ruby-like syntax, handles all sql joins under the hood
+- Do a 2 table inner join with jobs and view_histories and a condition `resumes = Resume.joins(:jobs, :view_histories).where("jobs.cmpany_name" => "Pluralsight")` NOTE when there is condition on join, must qualify columns used in condition with table name
+
+### Find by SQL
+
+- If ActiveRecord not supporting what you want to do, fallback to native SQL
+- `find_by_sql` will execute native query and map result to your object, i.e. run native SQL, but get return of ActiveRecord objects
+- Do a native select on the resumes table: `resumes = Resume.find_by_sql("select * from resumes where name like 'Dan%'")`
+
+### Rails 4 ActiveRecord Changes
+
+- Model.all returns ActiveRecord::relation instead of Data Array, supports lazy loading data, better performance
+- Model.first includes an order by id clause
+- Model.none method, opposite of `all` method, returns empty relation object that can be used to chain additional query methods (similar to null object pattern)
+- Model scope definitions utilize Lambda's, allows criteria of scope to be dfined at runtime rather than definition time. Improvement if using scopes for datetime criteria.
+- Finders deprecated and Model.find_by added
